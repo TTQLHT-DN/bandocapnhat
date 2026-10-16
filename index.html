@@ -8,6 +8,8 @@
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Sự cố hiện trường (bổ sung 10/2026) -->
+    <link rel="stylesheet" href="su_co.css" />
 
     <style>
         /* Trang chính: reset margin/padding và font mặc định */
@@ -910,6 +912,9 @@
                 document.getElementById('pctt-summary').textContent = 'Không tải được PCTT_BaoLu.geojson: ' + err;
             });
     </script>
+    <!-- Sự cố hiện trường: cấu hình máy chủ + chức năng (bổ sung 10/2026) -->
+    <script src="su_co_config.js"></script>
+    <script src="su_co.js"></script>
 </body>
 
 </html>
