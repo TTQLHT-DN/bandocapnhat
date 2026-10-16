@@ -31,7 +31,7 @@
     const GIAO_THONG = { binh_thuong: 'Lưu thông bình thường', han_che: 'Hạn chế, đi chậm', xe_lon: 'Chỉ xe lớn qua được', cam: 'Không qua được, phải phân luồng' };
     const GIAI_DOAN = { ban_dau: 'Ban đầu', dien_bien: 'Diễn biến', sau_khac_phuc: 'Sau khắc phục' };
     const VAI_TRO = { tuan_tra: 'Tuần tra', quan_ly: 'Quản lý', admin: 'Quản trị' };
-    const HANH_DONG = { tao: 'Tạo sự cố', cap_nhat: 'Cập nhật thông tin', doi_trang_thai: 'Đổi trạng thái', xac_nhan: 'Xác nhận sự cố', ket_thuc: 'Kết thúc sự cố', mo_lai: 'Mở lại sự cố', them_anh: 'Bổ sung ảnh' };
+    const HANH_DONG = { tao: 'Tạo sự cố', cap_nhat: 'Cập nhật thông tin', doi_trang_thai: 'Đổi trạng thái', xac_nhan: 'Xác nhận sự cố', ket_thuc: 'Kết thúc sự cố', mo_lai: 'Mở lại sự cố', them_anh: 'Bổ sung ảnh', xoa_anh: 'Xóa ảnh', xoa_su_co: 'Xóa sự cố', khoi_phuc: 'Khôi phục sự cố' };
     const FIELD_LABEL = {
         loai: 'Loại sự cố', muc_do: 'Mức độ ảnh hưởng', giao_thong: 'Tình trạng giao thông', huong_tuyen: 'Hướng tuyến, làn',
         mo_ta: 'Mô tả', tuyen: 'Tuyến đường', dia_gioi: 'Phường/xã', lat: 'Vĩ độ', lng: 'Kinh độ',
@@ -61,7 +61,7 @@
         catch (e) { return null; }
     }
     function loadSession() { const s = ls('sc_session'); return s && s.token && Date.parse(s.expires) > Date.now() ? s : null; }
-    function statusBadge(tt) { const s = TT[tt] || { t: tt, c: '#999' }; return `<span class="sc-status" style="background:${s.c}">${esc(s.t)}</span>`; }
+    function statusBadge(tt) { const s = TT[tt] || (tt === 'da_xoa' ? { t: 'Đã xóa', c: '#212121' } : { t: tt, c: '#999' }); return `<span class="sc-status" style="background:${s.c}">${esc(s.t)}</span>`; }
     function toast(msg, type, ms) {
         const el = document.createElement('div');
         el.className = 'sc-toast ' + (type || 'info'); el.textContent = msg;
@@ -70,6 +70,7 @@
     }
     function canEdit() { return !!state.session; }
     function isMgr() { return state.session && ['quan_ly', 'admin'].includes(state.session.user.vai_tro); }
+    function isAdmin() { return !!(state.session && state.session.user.vai_tro === 'admin'); }
 
     // ---------------- Gọi máy chủ ----------------
     async function call(method, payload, timeoutMs) {
@@ -268,8 +269,9 @@
         if (!API) { el.innerHTML = ''; $('sc-new').disabled = true; return; }
         if (state.session) {
             const u = state.session.user;
-            el.innerHTML = `<span>👤 <b>${esc(u.ho_ten)}</b> (${esc(VAI_TRO[u.vai_tro] || u.vai_tro)})</span><button class="sc-link" id="sc-logout">Đăng xuất</button>`;
+            el.innerHTML = `<span>👤 <b>${esc(u.ho_ten)}</b> (${esc(VAI_TRO[u.vai_tro] || u.vai_tro)})</span><span>${u.vai_tro === 'admin' ? '<button class="sc-link" id="sc-admin">⚙ Quản trị</button> · ' : ''}<button class="sc-link" id="sc-logout">Đăng xuất</button></span>`;
             $('sc-logout').onclick = () => { setSession(null); toast('Đã đăng xuất'); };
+            if ($('sc-admin')) $('sc-admin').onclick = () => openAdmin('users');
         } else {
             el.innerHTML = `<span>Chưa đăng nhập (chỉ xem)</span><button class="sc-link" id="sc-login">Đăng nhập</button>`;
             $('sc-login').onclick = () => openLogin();
@@ -569,6 +571,12 @@
         if (bg) { $('sc-x').addEventListener('click', restore); $('sc-cancel').addEventListener('click', restore); }
     }
 
+    function removeLocal(id) {
+        delete state.byId[id];
+        state.incidents = state.incidents.filter(x => x.id !== id);
+        state.lastHash = ''; render();
+    }
+
     function upsert(inc) {
         state.byId[inc.id] = inc;
         const i = state.incidents.findIndex(x => x.id === inc.id);
@@ -578,19 +586,19 @@
 
     // ---------------- Hồ sơ sự cố ----------------
     function row(label, val, raw) { return val ? `<tr><td>${esc(label)}</td><td>${raw ? val : esc(val)}</td></tr>` : ''; }
-    function gallery(photos) {
+    function gallery(photos, canDelete) {
         if (!photos || !photos.length) return '<div class="sc-note">Chưa có ảnh</div>';
         return Object.keys(GIAI_DOAN).map(g => {
             const ps = photos.filter(p => (p.giai_doan || 'dien_bien') === g);
             return ps.length ? `<div style="margin:6px 0 2px;font-weight:bold;font-size:13px">${GIAI_DOAN[g]} (${ps.length})</div><div class="sc-gallery">` +
-                ps.map(p => `<a href="${esc(p.url)}" target="_blank" rel="noopener" title="${esc((p.nguoi || '') + ' · ' + fmt(p.thoi_gian))}"><img src="${esc(p.thumb)}" alt="Ảnh ${esc(GIAI_DOAN[g])}" loading="lazy" referrerpolicy="no-referrer"></a>`).join('') + '</div>' : '';
+                ps.map(p => `<div style="position:relative"><a href="${esc(p.url)}" target="_blank" rel="noopener" title="${esc((p.nguoi || '') + ' · ' + fmt(p.thoi_gian))}"><img src="${esc(p.thumb)}" alt="Ảnh ${esc(GIAI_DOAN[g])}" loading="lazy" referrerpolicy="no-referrer"></a>${canDelete ? `<button class="sc-del-photo" data-del-photo="${esc(p.id)}" title="Xóa ảnh này" aria-label="Xóa ảnh">🗑</button>` : ''}</div>`).join('') + '</div>' : '';
         }).join('');
     }
     function changeText(c) {
         return Object.keys(c || {}).map(k => {
             let v = c[k];
             if (k === 'loai') v = (LOAI[v] || {}).t || v; else if (k === 'muc_do') v = MUC_DO[v] || v; else if (k === 'giao_thong') v = GIAO_THONG[v] || v;
-            else if (/xu_ly$|phat_hien$/.test(k) && v) v = fmt(v); else if (k === 'da_xac_nhan') v = 'Có';
+            else if (/xu_ly$|phat_hien$/.test(k) && v) v = fmt(v); else if (k === 'da_xac_nhan') v = 'Có'; else if (k === 'anh_da_xoa') return 'Đã xóa ' + (v || []).length + ' ảnh';
             return `${FIELD_LABEL[k] || k}: ${v}`;
         }).join('; ');
     }
@@ -609,6 +617,7 @@
             if (isMgr()) actions += `<button class="sc-btn grey" id="sc-d-end">Kết thúc sự cố</button>`;
         }
         if (u && u.vai_tro === 'admin' && ended) actions += `<button class="sc-btn blue" id="sc-d-reopen">Mở lại</button>`;
+        if (isAdmin()) actions += `<button class="sc-btn red" id="sc-d-del">🗑 Xóa sự cố</button>`;
         const L0 = LOAI[inc.loai] || LOAI.khac;
         modal(`${L0.i} ${esc(inc.id)} · ${esc(L0.t)}`, `<div class="sc-detail">
             <div>${statusBadge(inc.trang_thai)} ${inc.da_xac_nhan === 'co' ? `<span class="sc-status" style="background:#1565c0">Đã xác nhận bởi ${esc(inc.nguoi_xac_nhan)}</span>` : '<span class="sc-status" style="background:#9e9e9e">Chưa xác nhận</span>'}</div>
@@ -625,7 +634,7 @@
                 ${row('Ghi chú kiểm tra', inc.ghi_chu_kiem_tra)}${row('Tài liệu liên quan', inc.tai_lieu)}
                 ${row('Thời điểm kết thúc sự cố', fmt(inc.thoi_gian_ket_thuc))}
             </table>
-            <h4>Ảnh hiện trường</h4>${gallery(inc.anh)}
+            <h4>Ảnh hiện trường</h4>${gallery(inc.anh, isAdmin())}
             <h4>Lịch sử cập nhật</h4><div id="sc-hist" class="sc-note">Đang tải lịch sử…</div>
             <div class="sc-src">Nguồn: ${esc(inc.nguon || 'Cán bộ cập nhật hiện trường')}. Dữ liệu lưu trên Google Sheets, ảnh lưu trên Google Drive.</div>
             <div id="sc-d-msg" class="sc-msg" style="display:none"></div></div>`, actions);
@@ -635,6 +644,11 @@
         if ($('sc-d-confirm')) $('sc-d-confirm').onclick = () => quickAction(inc, { confirm: true }, 'Xác nhận sự cố', 'Ghi chú xác nhận (không bắt buộc)');
         if ($('sc-d-end')) $('sc-d-end').onclick = () => quickAction(inc, { status: 'da_ket_thuc' }, 'Kết thúc sự cố', 'Kết quả, ghi chú khi kết thúc (khuyến nghị nhập)');
         if ($('sc-d-reopen')) $('sc-d-reopen').onclick = () => quickAction(inc, { reopen: true, status: 'dang_xu_ly' }, 'Mở lại sự cố', 'Lý do mở lại');
+        if ($('sc-d-del')) $('sc-d-del').onclick = () => quickAction(inc, {}, 'Xóa sự cố', 'Lý do xóa (bắt buộc), ví dụ: báo trùng, báo nhầm, dữ liệu thử', { action: 'delete_incident', required: true, danger: true });
+        document.querySelectorAll('[data-del-photo]').forEach(b => b.onclick = ev => {
+            ev.preventDefault();
+            quickAction(inc, { fileId: b.dataset.delPhoto }, 'Xóa ảnh', 'Lý do xóa ảnh (bắt buộc), ví dụ: ảnh mờ, chụp nhầm, chứa thông tin cá nhân', { action: 'delete_photo', required: true, danger: true });
+        });
         try {
             const h = await call('GET', { action: 'history', id }, 30000);
             const el = $('sc-hist'); if (!el) return;
@@ -645,22 +659,28 @@
                 ${it.trang_thai_truoc !== it.trang_thai_sau && it.trang_thai_sau ? ` · ${it.trang_thai_truoc ? statusBadge(it.trang_thai_truoc) + ' → ' : ''}${statusBadge(it.trang_thai_sau)}` : ''}
                 ${Object.keys(it.noi_dung || {}).length ? `<div>${esc(changeText(it.noi_dung))}</div>` : ''}
                 ${it.ghi_chu ? `<div>📝 ${esc(it.ghi_chu)}</div>` : ''}
-                ${it.anh && it.anh.length ? `<div class="sc-gallery" style="margin-top:4px">${it.anh.map(p => `<a href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer"></a>`).join('')}</div>` : ''}
+                ${it.anh && it.anh.length ? `<div class="sc-gallery" style="margin-top:4px">${it.anh.map(p => p.da_xoa ? `<div class="sc-photo-gone">Ảnh đã xóa</div>` : `<a href="${esc(p.url)}" target="_blank" rel="noopener"><img src="${esc(p.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer"></a>`).join('')}</div>` : ''}
             </li>`).join('') + '</ul>' : '<div class="sc-note">Chưa có lịch sử</div>';
         } catch (e) { const el = $('sc-hist'); if (el) { el.className = 'sc-msg err'; el.textContent = 'Không tải được lịch sử: ' + e.message; } }
     }
 
-    function quickAction(inc, extra, title, noteLabel) {
+    function quickAction(inc, extra, title, noteLabel, opt) {
+        opt = opt || {};
         const reqId = uuid();
         modal(`${esc(title)} · ${esc(inc.id)}`, `<label for="sc-qa-note">${esc(noteLabel)}</label><textarea id="sc-qa-note"></textarea>
             <div id="sc-qa-msg" class="sc-msg" style="display:none"></div>`,
-            `<button class="sc-btn" id="sc-cancel">Quay lại</button><button class="sc-btn ${extra.status === 'da_ket_thuc' ? 'grey' : 'green'}" id="sc-qa-go">${esc(title)}</button>`);
+            `<button class="sc-btn" id="sc-cancel">Quay lại</button><button class="sc-btn ${opt.danger ? 'red' : extra.status === 'da_ket_thuc' ? 'grey' : 'green'}" id="sc-qa-go">${esc(title)}</button>`);
         $('sc-cancel').onclick = () => openDetail(inc.id);
         $('sc-qa-go').onclick = async () => {
+            const note = $('sc-qa-note').value.trim();
+            if (opt.required && !note) { msgBox('sc-qa-msg', 'Cần nhập lý do', 'err'); return; }
             const b = $('sc-qa-go'); b.disabled = true; msgBox('sc-qa-msg', 'Đang lưu…', 'info');
             try {
-                const r = await post(Object.assign({ action: 'update', id: inc.id, clientRequestId: reqId, note: $('sc-qa-note').value.trim() }, extra), 60000);
-                upsert(r.incident); toast(`${title}: đã lưu ${r.incident.id}`, 'ok'); openDetail(r.incident.id);
+                const r = await post(Object.assign({ action: opt.action || 'update', id: inc.id, clientRequestId: reqId, note }, extra), 60000);
+                if (opt.action === 'delete_incident') { removeLocal(inc.id); closeModal(); toast(`Đã xóa sự cố ${inc.id} (khôi phục được trong ⚙ Quản trị)`, 'ok', 5000); return; }
+                upsert(r.incident);
+                toast(opt.action === 'delete_photo' ? `Đã xóa ảnh${r.trashed ? ' (ảnh nằm trong Thùng rác Google Drive 30 ngày)' : ''}` : `${title}: đã lưu ${r.incident.id}`, 'ok', 5000);
+                openDetail(r.incident.id);
             } catch (e) { msgBox('sc-qa-msg', 'CHƯA LƯU: ' + e.message, 'err'); b.disabled = false; }
         };
     }
@@ -672,6 +692,8 @@
         const photos = [];
         const statusOpts = Object.keys(TT).filter(k => k !== 'da_ket_thuc');
         const localDT = iso => iso ? toLocalInput(new Date(iso)) : '';
+        const own = state.session && state.session.user.username === inc.nguoi_tao;
+        const canGoc = mgr || own;
         const bg = modal(`Cập nhật ${esc(inc.id)}`, `
             <label for="sc-u-tt">Trạng thái</label>
             <select id="sc-u-tt">${statusOpts.map(k => `<option value="${k}"${k === inc.trang_thai ? ' selected' : ''}>${TT[k].t}</option>`).join('')}</select>
@@ -682,6 +704,16 @@
             <label>Ảnh bổ sung</label>
             <select id="sc-u-gd">${Object.keys(GIAI_DOAN).filter(k => k !== 'ban_dau').map(k => `<option value="${k}"${(k === 'sau_khac_phuc') === (inc.trang_thai === 'da_khac_phuc') ? ' selected' : ''}>Ảnh ${GIAI_DOAN[k].toLowerCase()}</option>`).join('')}</select>
             ${photoPicker('sc-u-ph')}
+            ${canGoc ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:bold;color:#0026FF">✏️ Sửa thông tin ban đầu${mgr ? '' : ' (người báo)'}</summary>
+                <label>Loại sự cố</label>${chips('loai', LOAI, inc.loai)}
+                <div class="sc-row" style="gap:8px"><div><label for="sc-u-tuyen">Tuyến đường</label><input type="text" id="sc-u-tuyen" value="${esc(inc.tuyen)}"></div>
+                <div><label for="sc-u-dg">Phường/xã</label><input type="text" id="sc-u-dg" value="${esc(inc.dia_gioi)}"></div></div>
+                <label for="sc-u-huong">Hướng tuyến, làn</label><input type="text" id="sc-u-huong" value="${esc(inc.huong_tuyen)}">
+                <label for="sc-u-mota">Mô tả</label><textarea id="sc-u-mota">${esc(inc.mo_ta)}</textarea>
+                ${mgr ? `<label for="sc-u-tgph">Thời gian phát hiện</label><input type="datetime-local" id="sc-u-tgph" value="${localDT(inc.thoi_gian_phat_hien)}">
+                <div class="sc-row" style="gap:8px"><div><label for="sc-u-lat">Vĩ độ</label><input type="text" id="sc-u-lat" value="${inc.lat}"></div>
+                <div><label for="sc-u-lng">Kinh độ</label><input type="text" id="sc-u-lng" value="${inc.lng}"></div></div>` : ''}
+            </details>` : ''}
             ${mgr ? `<h4 style="margin:14px 0 4px;color:#0026FF">Thông tin xử lý (cán bộ quản lý)</h4>
                 <label for="sc-u-dv">Đơn vị phụ trách</label><input type="text" id="sc-u-dv" value="${esc(inc.don_vi_phu_trach)}">
                 <label for="sc-u-bp">Biện pháp xử lý</label><textarea id="sc-u-bp">${esc(inc.bien_phap_xu_ly)}</textarea>
@@ -700,6 +732,16 @@
             const data = {};
             const setIf = (k, v) => { if (String(v) !== String(inc[k] || '')) data[k] = v; };
             setIf('muc_do', chipVal(bg, 'muc_do')); setIf('giao_thong', chipVal(bg, 'giao_thong'));
+            if (canGoc) {
+                setIf('loai', chipVal(bg, 'loai')); setIf('tuyen', $('sc-u-tuyen').value.trim()); setIf('dia_gioi', $('sc-u-dg').value.trim());
+                setIf('huong_tuyen', $('sc-u-huong').value.trim()); setIf('mo_ta', $('sc-u-mota').value.trim());
+                if (mgr) {
+                    const tg = $('sc-u-tgph').value; if (tg !== localDT(inc.thoi_gian_phat_hien)) data.thoi_gian_phat_hien = tg ? new Date(tg).toISOString() : '';
+                    const la = Number($('sc-u-lat').value), lo = Number($('sc-u-lng').value);
+                    if (!isFinite(la) || !isFinite(lo)) { msgBox('sc-u-msg', 'Tọa độ không hợp lệ', 'err'); btn.disabled = false; return; }
+                    if (Math.abs(la - inc.lat) > 1e-7) data.lat = la; if (Math.abs(lo - inc.lng) > 1e-7) data.lng = lo;
+                }
+            }
             if (mgr) {
                 setIf('don_vi_phu_trach', $('sc-u-dv').value.trim()); setIf('bien_phap_xu_ly', $('sc-u-bp').value.trim());
                 setIf('ghi_chu_kiem_tra', $('sc-u-gc').value.trim()); setIf('tai_lieu', $('sc-u-tl').value.trim());
@@ -726,6 +768,71 @@
                 btn.disabled = false;
                 if (e.code && /^AUTH_/.test(e.code)) openLoginKeep();
             }
+        };
+    }
+
+    // ---------------- Quản trị viên ----------------
+    async function openAdmin(tab, editUser) {
+        if (!isAdmin()) return;
+        const tabs = `<div class="sc-row" style="margin-bottom:10px"><button class="sc-btn ${tab === 'users' ? 'blue' : ''}" id="sc-ad-t1">👥 Tài khoản</button><button class="sc-btn ${tab === 'deleted' ? 'blue' : ''}" id="sc-ad-t2">🗑 Sự cố đã xóa</button></div>`;
+        modal('⚙ Quản trị hệ thống', tabs + '<div id="sc-ad-body" class="sc-note">Đang tải…</div><div id="sc-ad-msg" class="sc-msg" style="display:none"></div>', '<button class="sc-btn" id="sc-cancel">Đóng</button>');
+        $('sc-cancel').onclick = closeModal;
+        $('sc-ad-t1').onclick = () => openAdmin('users');
+        $('sc-ad-t2').onclick = () => openAdmin('deleted');
+        const body = $('sc-ad-body');
+        try {
+            if (tab === 'users' && editUser !== undefined) return userForm(body, editUser);
+            if (tab === 'users') {
+                const r = await post({ action: 'admin_users' }, 30000);
+                state.adminUsers = r.users;
+                body.className = '';
+                body.innerHTML = `<button class="sc-btn green" id="sc-ad-new">＋ Thêm tài khoản</button>
+                    <div style="overflow-x:auto;margin-top:8px"><table class="sc-utable"><tr><th>Tên đăng nhập</th><th>Họ tên</th><th>Đơn vị</th><th>Vai trò</th><th>Trạng thái</th><th></th></tr>
+                    ${r.users.map((u, i) => `<tr${u.trang_thai !== 'hoat_dong' ? ' style="opacity:.55"' : ''}><td>${esc(u.username)}</td><td>${esc(u.ho_ten)}</td><td>${esc(u.don_vi)}</td>
+                        <td><b>${esc(VAI_TRO[u.vai_tro] || u.vai_tro)}</b></td><td>${u.trang_thai === 'hoat_dong' ? 'Hoạt động' : '🔒 Đã khóa'}</td>
+                        <td><button class="sc-link" data-edit-user="${i}">Sửa</button></td></tr>`).join('')}</table></div>
+                    <div class="sc-note">Quyền: <b>Tuần tra</b> báo và cập nhật sự cố · <b>Quản lý</b> thêm xác nhận, giao xử lý, kết thúc · <b>Quản trị</b> toàn quyền: xóa ảnh, xóa/khôi phục sự cố, quản lý tài khoản.</div>`;
+                $('sc-ad-new').onclick = () => openAdmin('users', null);
+                body.querySelectorAll('[data-edit-user]').forEach(b => b.onclick = () => openAdmin('users', state.adminUsers[Number(b.dataset.editUser)]));
+            } else {
+                const r = await post({ action: 'admin_deleted' }, 30000);
+                body.className = '';
+                body.innerHTML = r.incidents.length ? '<ul class="sc-list" style="max-height:none">' + r.incidents.map(i => `<li style="cursor:default">${(LOAI[i.loai] || LOAI.khac).i} <b>${esc(i.id)}</b> · ${esc((LOAI[i.loai] || LOAI.khac).t)}
+                    <br><span class="meta">${esc(i.tuyen || '')} ${esc(i.dia_gioi || '')} · báo lúc ${fmt(i.thoi_gian_tao)} · xóa lúc ${fmt(i.thoi_gian_cap_nhat)} bởi ${esc(i.ho_ten_nguoi_cap_nhat)}</span>
+                    <br><button class="sc-btn green" data-restore="${esc(i.id)}" style="margin-top:4px">Khôi phục</button></li>`).join('') + '</ul>'
+                    : '<div class="sc-note">Không có sự cố nào bị xóa.</div>';
+                body.querySelectorAll('[data-restore]').forEach(b => b.onclick = async () => {
+                    b.disabled = true;
+                    try { const x = await post({ action: 'restore_incident', id: b.dataset.restore, clientRequestId: uuid() }, 30000); upsert(x.incident); toast('Đã khôi phục ' + x.incident.id, 'ok'); openAdmin('deleted'); }
+                    catch (e) { msgBox('sc-ad-msg', e.message, 'err'); b.disabled = false; }
+                });
+            }
+        } catch (e) { body.className = 'sc-msg err'; body.textContent = 'Lỗi: ' + e.message; }
+    }
+
+    function userForm(body, u) {
+        const isNew = !u;
+        u = u || { username: '', ho_ten: '', don_vi: '', vai_tro: 'tuan_tra', trang_thai: 'hoat_dong' };
+        const self = state.session.user.username === u.username;
+        body.className = '';
+        body.innerHTML = `<h4 style="margin:0 0 6px">${isNew ? 'Thêm tài khoản mới' : 'Sửa tài khoản ' + esc(u.username)}</h4>
+            <label for="sc-uf-u">Tên đăng nhập (không dấu, viết thường)</label><input type="text" id="sc-uf-u" value="${esc(u.username)}" ${isNew ? '' : 'disabled'} autocapitalize="none">
+            <label for="sc-uf-h">Họ và tên</label><input type="text" id="sc-uf-h" value="${esc(u.ho_ten)}">
+            <label for="sc-uf-d">Đơn vị</label><input type="text" id="sc-uf-d" value="${esc(u.don_vi)}">
+            <label for="sc-uf-r">Vai trò</label><select id="sc-uf-r" ${self ? 'disabled' : ''}>${Object.keys(VAI_TRO).map(k => `<option value="${k}"${k === u.vai_tro ? ' selected' : ''}>${VAI_TRO[k]}</option>`).join('')}</select>
+            <label for="sc-uf-s">Trạng thái</label><select id="sc-uf-s" ${self ? 'disabled' : ''}><option value="hoat_dong">Hoạt động</option><option value="khoa"${u.trang_thai === 'khoa' ? ' selected' : ''}>Khóa (không đăng nhập được)</option></select>
+            <label for="sc-uf-p">${isNew ? 'Mật khẩu (tối thiểu 6 ký tự)' : 'Mật khẩu mới (để trống nếu không đổi)'}</label><input type="password" id="sc-uf-p" autocomplete="new-password">
+            ${self ? '<div class="sc-note">Không thể tự hạ quyền hoặc tự khóa tài khoản đang dùng.</div>' : ''}
+            <div class="sc-row" style="margin-top:10px"><button class="sc-btn" id="sc-uf-back">Quay lại</button><button class="sc-btn blue" id="sc-uf-save">Lưu tài khoản</button></div>`;
+        $('sc-uf-back').onclick = () => openAdmin('users');
+        $('sc-uf-save').onclick = async () => {
+            const b = $('sc-uf-save'); b.disabled = true;
+            const data = { username: $('sc-uf-u').value.trim().toLowerCase(), ho_ten: $('sc-uf-h').value.trim(), don_vi: $('sc-uf-d').value.trim(), vai_tro: $('sc-uf-r').value, trang_thai: $('sc-uf-s').value };
+            const pw = $('sc-uf-p').value; if (pw) data.password = pw;
+            try {
+                const r = await post({ action: 'admin_user_save', user: data }, 30000);
+                toast('Đã lưu tài khoản ' + r.user.username, 'ok'); openAdmin('users');
+            } catch (e) { msgBox('sc-ad-msg', e.message, 'err'); b.disabled = false; }
         };
     }
 
